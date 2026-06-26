@@ -2,7 +2,7 @@ name: GuppyNodes Auto Renew
 
 on:
   schedule:
-    - cron: "0 2 * * *"
+  - cron: '30 4 */6 * *'
   workflow_dispatch:
 
 
