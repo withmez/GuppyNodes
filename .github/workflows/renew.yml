@@ -1,0 +1,200 @@
+name: GuppyNodes Auto Renew
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── 1. Checkout 公共仓库 ───────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Checkout 私有脚本仓库 ───────────────────────────────
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/GuppyNodes-scripts
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: scripts
+
+      - name: Install Dependencies
+        run: pip install --quiet curl_cffi pynacl
+
+      # ── 3. 代理框架：Xray + Hysteria2 双核心，socks5/http 直连透传 ──
+      - name: Setup Proxy
+        env:
+          PROXY_NODE: ${{ secrets.PROXY_NODE }}
+        run: |
+          if [ -z "$PROXY_NODE" ]; then
+            echo "[INFO] 未配置代理，直连模式"
+            echo "PROXY_SERVER=" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          NODE=$(echo "$PROXY_NODE" | tr '[:upper:]' '[:lower:]')
+
+          if echo "$NODE" | grep -q '^socks5://\|^socks://\|^http://'; then
+            echo "PROXY_SERVER=$PROXY_NODE" >> $GITHUB_ENV
+            echo "[INFO] ✅ 直接透传代理"
+            exit 0
+          fi
+
+          # Hysteria2
+          if echo "$NODE" | grep -q '^hy2://\|^hysteria2://'; then
+            echo "[INFO] 下载 Hysteria2 核心..."
+            wget -q https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64 -O hysteria
+            chmod +x hysteria
+
+            python3 << 'PYEOF'
+          import os, json
+          from urllib.parse import parse_qs
+          url = os.environ["PROXY_NODE"].strip()
+          c = url[len("hysteria2://"):] if url.startswith("hysteria2://") else url[len("hy2://"):]
+          if "#" in c: c = c.rsplit("#",1)[0]
+          pw, rest = c.split("@",1)
+          hp, ps = rest.split("?",1) if "?" in rest else (rest,"")
+          addr, port = hp.rsplit(":",1) if ":" in hp else (hp,"443")
+          p = parse_qs(ps)
+          cfg = {
+              "server": f"{addr}:{port}",
+              "auth": pw,
+              "tls": {"sni": p.get("sni",[addr])[0], "insecure": p.get("insecure",["0"])[0]=="1"},
+              "socks5": {"listen":"127.0.0.1:1080"},
+              "http": {"listen":"127.0.0.1:1081"}
+          }
+          json.dump(cfg, open("hy2.json","w"), indent=2)
+          print(f"[INFO] Hysteria2 -> {addr}:{port}")
+          PYEOF
+
+            ./hysteria -c hy2.json > hy2.log 2>&1 &
+            sleep 3
+          fi
+
+          # Xray: vless / vmess / trojan / ss
+          if echo "$NODE" | grep -q '^vless://\|^vmess://\|^trojan://\|^ss://'; then
+            echo "[INFO] 下载 Xray 核心..."
+            wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+            unzip -q Xray-linux-64.zip -d xray && chmod +x xray/xray
+
+            python3 << 'PYEOF'
+          import os, json, base64
+          from urllib.parse import parse_qs, unquote
+          url = os.environ["PROXY_NODE"].strip()
+          if url.startswith("vless://"): proto, c = "vless", url[8:]
+          elif url.startswith("vmess://"): proto, c = "vmess", url[8:]
+          elif url.startswith("trojan://"): proto, c = "trojan", url[9:]
+          elif url.startswith("ss://"): proto, c = "ss", url[5:]
+          else: exit(1)
+          if "#" in c: c = c.rsplit("#",1)[0]
+          cfg = {"log":{"loglevel":"warning"},
+                 "inbounds":[{"port":1080,"listen":"127.0.0.1","protocol":"socks","settings":{"udp":True}},
+                              {"port":1081,"listen":"127.0.0.1","protocol":"http"}],
+                 "outbounds":[]}
+
+          if proto == "vless":
+              uid, rest = c.split("@",1)
+              hp, ps = rest.split("?",1) if "?" in rest else (rest,"")
+              addr, port = hp.rsplit(":",1) if ":" in hp else (hp,"443")
+              p = parse_qs(ps)
+              sec = p.get("security",["none"])[0]; net = p.get("type",["tcp"])[0]
+              ob = {"protocol":"vless","settings":{"vnext":[{"address":addr,"port":int(port),"users":[{"id":uid,"encryption":"none"}]}]},
+                    "streamSettings":{"network":net,"security":sec}}
+              if p.get("flow",[""])[0]: ob["settings"]["vnext"][0]["users"][0]["flow"] = p["flow"][0]
+              if sec=="reality": ob["streamSettings"]["realitySettings"]={"serverName":p.get("sni",[addr])[0],"fingerprint":p.get("fp",["chrome"])[0],"publicKey":p.get("pbk",[""])[0]}
+              elif sec=="tls": ob["streamSettings"]["tlsSettings"]={"serverName":p.get("sni",[addr])[0],"fingerprint":p.get("fp",["chrome"])[0],"allowInsecure":False}
+              if net=="ws": ob["streamSettings"]["wsSettings"]={"path":unquote(p.get("path",["/"])[0]),"headers":{"Host":p.get("host",[p.get("sni",[addr])[0]])[0]}}
+              elif net=="grpc": ob["streamSettings"]["grpcSettings"]={"serviceName":p.get("serviceName",[""])[0]}
+              cfg["outbounds"].append(ob)
+
+          elif proto == "vmess":
+              pad = 4 - len(c) % 4
+              if pad != 4: c += "=" * pad
+              vm = json.loads(base64.b64decode(c).decode())
+              ob = {"protocol":"vmess","settings":{"vnext":[{"address":vm.get("add",""),"port":int(vm.get("port",443)),
+                        "users":[{"id":vm.get("id",""),"alterId":int(vm.get("aid",0)),"security":"auto"}]}]},
+                    "streamSettings":{"network":vm.get("net","tcp"),"security":"tls" if vm.get("tls")=="tls" else "none"}}
+              if vm.get("tls")=="tls": ob["streamSettings"]["tlsSettings"]={"serverName":vm.get("sni",vm.get("host",vm.get("add",""))),"allowInsecure":False}
+              if vm.get("net")=="ws": ob["streamSettings"]["wsSettings"]={"path":vm.get("path","/"),"headers":{"Host":vm.get("host",vm.get("add",""))}}
+              cfg["outbounds"].append(ob)
+
+          elif proto == "trojan":
+              pw, rest = c.split("@",1)
+              hp, ps = rest.split("?",1) if "?" in rest else (rest,"")
+              addr, port = hp.rsplit(":",1) if ":" in hp else (hp,"443")
+              p = parse_qs(ps)
+              cfg["outbounds"].append({"protocol":"trojan","settings":{"servers":[{"address":addr,"port":int(port),"password":pw}]},
+                  "streamSettings":{"network":p.get("type",["tcp"])[0],"security":"tls","tlsSettings":{"serverName":p.get("sni",[addr])[0],"allowInsecure":False}}})
+
+          elif proto == "ss":
+              if "@" in c:
+                  enc, sp = c.split("@",1)
+                  dec = base64.b64decode(enc+"==").decode()
+                  m, pw = dec.split(":",1)
+                  addr, port = sp.split(":",1)
+              else:
+                  dec = base64.b64decode(c+"==").decode()
+                  m, rest = dec.split(":",1)
+                  pw, sp = rest.split("@",1) if "@" in rest else (rest,"")
+                  addr, port = sp.split(":",1)
+              cfg["outbounds"].append({"protocol":"shadowsocks","settings":{"servers":[{"address":addr,"port":int(port),"method":m,"password":pw}]}})
+
+          json.dump(cfg, open("xray.json","w"), indent=2)
+          print("[INFO] Xray 配置已生成")
+          PYEOF
+
+            ./xray/xray run -c xray.json > xray.log 2>&1 &
+            sleep 5
+          fi
+
+          # 代理联通性检查
+          echo "[INFO] 测试代理连通性..."
+          for i in 1 2 3 4 5; do
+            if curl -x socks5://127.0.0.1:1080 -s --max-time 15 https://api.ipify.org > /dev/null 2>&1; then
+              echo "[INFO] ✅ 代理连接成功"
+              echo "PROXY_SERVER=socks5://127.0.0.1:1080" >> $GITHUB_ENV
+              exit 0
+            fi
+            echo "[WARN] 尝试 $i/5..."
+            sleep 3
+          done
+          echo "[ERROR] ❌ 代理连接失败"
+          cat xray.log 2>/dev/null || cat hy2.log 2>/dev/null || true
+          exit 1
+
+      # ── 4. 运行续期（指定到 scripts 相对路径下执行） ──
+      - name: Run Renew Script
+        env:
+          COOKIE:       ${{ secrets.COOKIE }}
+          GH_PAT:       ${{ secrets.PRIVATE_REPO_TOKEN }}   # 使用具备 Actions 写入和拉取特权的 Token 统一完成交互
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+        run: python scripts/renew.py
+
+      # ── 5. 上传执行日志与网络倾倒 ──
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guppy-logs-${{ github.run_id }}
+          path: |
+            logs/
+            dumps/
+            *.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ── 6. 清理 Actions 运行历史 ──
+      - name: Delete Old Workflow Runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 5
