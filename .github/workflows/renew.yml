@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/GuppyNodes-scripts
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          token: ${{ secrets.GH_PAT }} 
           path: scripts
 
       - name: Install Dependencies
@@ -172,7 +172,7 @@ jobs:
       - name: Run Renew Script
         env:
           COOKIE:       ${{ secrets.COOKIE }}
-          GH_PAT:       ${{ secrets.PRIVATE_REPO_TOKEN }}   # 使用具备 Actions 写入和拉取特权的 Token 统一完成交互
+          GH_PAT:       ${{ secrets.GH_PAT }} 
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
         run: python scripts/renew.py
