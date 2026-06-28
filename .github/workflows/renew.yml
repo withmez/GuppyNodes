@@ -2,9 +2,8 @@ name: GuppyNodes Auto Renew
 
 on:
   schedule:
-  - cron: '30 4 */6 * *'
+    - cron: '30 4 */6 * *'
   workflow_dispatch:
-
 
 jobs:
   renew:
@@ -95,7 +94,7 @@ jobs:
           if "#" in c: c = c.rsplit("#",1)[0]
           cfg = {"log":{"loglevel":"warning"},
                  "inbounds":[{"port":1080,"listen":"127.0.0.1","protocol":"socks","settings":{"udp":True}},
-                              {"port":1081,"listen":"127.0.0.1","protocol":"http"}],
+                             {"port":1081,"listen":"127.0.0.1","protocol":"http"}],
                  "outbounds":[]}
 
           if proto == "vless":
@@ -192,6 +191,7 @@ jobs:
 
       # ── 6. 清理 Actions 运行历史 ──
       - name: Delete Old Workflow Runs
+        if: always()
         uses: Mattraks/delete-workflow-runs@v2
         with:
           token: ${{ github.token }}
