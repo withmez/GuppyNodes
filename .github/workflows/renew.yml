@@ -1,8 +1,8 @@
-name: GuppyNodes Auto Renew
+name: GuppyNodes Renew
 
 on:
   schedule:
-    # 每 6 天的 04:30 UTC 运行一次
+    # 每 20 天的 04:30 UTC 运行一次
     - cron: '30 4 */20 * *'
   workflow_dispatch:
 
@@ -53,8 +53,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           PROXY_NODE: ${{ secrets.PROXY_NODE }} # 可选：支持各种原生节点/订阅链接，不填则自动直连
         run: |
-          cd scripts
-          python renew_browser.py
+          python renew.py
   
       # ── 6. 异常熔断机制：失败时上传现场截图 ─────────────────────
       - name: Upload Error Screenshot if Failed
