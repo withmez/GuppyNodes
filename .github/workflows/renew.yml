@@ -1,4 +1,4 @@
-name: GuppyNodes Auto Renew
+name: "🔄 GuppyNodes Auto Renew Engine"
 
 on:
   schedule:
@@ -8,55 +8,71 @@ on:
 
 jobs:
   renew:
+    name: "🚀 Execute Core Pipeline"
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     permissions:
-      actions: write   # 显式声明 actions: write，gh CLI 才有权限删除日志
+      actions: write   # 允许 gh CLI 裁剪与擦除历史运行日志
       contents: read
 
     steps:
-      # ── 1. 检出公共仓库 ───────────────────────────────────────
-      - name: Checkout
+      # ── 1. 环境初始化 ───────────────────────────────────────
+      - name: "📂 [1/8] Checkout Public Proxy Repository"
         uses: actions/checkout@v4
 
-      # ── 2. 检出私有脚本仓库 ───────────────────────────────────
-      - name: Checkout private repo
+      # ── 2. 安全拉取私有核心 ───────────────────────────────────
+      - name: "🔒 [2/8] Fetch Private Core Scripts Securely"
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/GuppyNodes-scripts
           token: ${{ secrets.GH_PAT }}
           path: scripts
 
-      # ── 3. 设置 Python 环境 ────────────────────────────────────
-      - name: Set up Python
+      # ── 3. 部署统一运行环境 ───────────────────────────────────
+      - name: "🐍 [3/8] Deploy Python Standard Environment"
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # 升级到推荐的 3.11，完美支持强类型注解
+          python-version: '3.11'
 
-      # ── 4. 安装核心依赖 (Playwright & 下载 Sing-box) ──────────
-      - name: Install System & Python Dependencies
+      # ── 4. 依赖注入与裁剪（✨已修复 email-validator 报错） ───
+      - name: "📦 [4/8] Inject Python & System Dependencies"
         run: |
+          echo "======================================================="
+          echo "⚙️ 正在初始化底层依赖架构..."
+          echo "======================================================="
           pip install --upgrade pip
-          pip install requests beautifulsoup4 playwright playwright-stealth tenacity pydantic PyGithub
+          
+          # ✨ 核心修复：显式安装 email-validator 解决 Pydantic 编译熔断问题
+          pip install requests beautifulsoup4 playwright playwright-stealth tenacity pydantic PyGithub email-validator
+          
+          echo "[+] Python 依赖库加载完毕，开始部署浏览器内核..."
           playwright install chromium --with-deps
           
-          # 下载官方原生高性能 Sing-box 核心并移动到系统 PATH 中
+          echo "[+] 正在拉取 Sing-box 流量清洗引擎..."
           curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.8.5/sing-box-1.8.5-linux-amd64.tar.gz
           tar -xvf sing-box.tar.gz
           sudo mv sing-box-*/sing-box /usr/local/bin/
           chmod +x /usr/local/bin/sing-box
+          
+          echo "-------------------------------------------------------"
+          echo "✅ 基础运行环境准备就绪！"
+          echo "======================================================="
 
-      # ── 5. 读取云端 Cookie 缓存（实现自愈刷新环路） ────────────
-      - name: Restore Active Cookie Cache from Private Secret
+      # ── 5. 会话级缓存自愈回灌 ─────────────────────────────────
+      - name: "💾 [5/8] Hydrate Session Cache From Secret Store"
         run: |
+          echo "======================================================="
           if [ ! -z "${{ secrets.GUPPY_COOKIE }}" ]; then
             echo '${{ secrets.GUPPY_COOKIE }}' > scripts/cookies.json
-            echo "[+] 成功从私库密文库倒灌注入历史活跃会话缓存。"
+            echo "🔓 [SUCCESS] 发现历史活跃会话，成功反向注入本地文件。"
+          else
+            echo "⚠️ [NOTICE] 未检测到云端历史凭证，本次执行将初始化全新登录。"
           fi
+          echo "======================================================="
 
-      # ── 6. 强力穿盾：执行全包办式 Python 脚本 ──────────────────
-      - name: Execute Browser Automation Script
+      # ── 6. 核心自动化执行 ─────────────────────────────────────
+      - name: "🔥 [6/8] Run Cloudflare-Bypass Automation Task"
         env:
           GUPPY_USERNAME: ${{ secrets.GUPPY_USERNAME }}
           GUPPY_PASSWORD: ${{ secrets.GUPPY_PASSWORD }}
@@ -66,11 +82,15 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
           PRIVATE_REPOSITORY: ${{ github.repository_owner }}/GuppyNodes-scripts
         run: |
+          echo "======================================================="
+          echo "🚀 正在穿透安全屏障并接管续期流..."
+          echo "======================================================="
           cd scripts
           python renew.py
+          echo "======================================================="
 
-      # ── 7. 异常熔断机制：失败时上传现场截图 ─────────────────────
-      - name: Upload Error Screenshot if Failed
+      # ── 7. 异常熔断保护机制 ───────────────────────────────────
+      - name: "📸 [7/8] Incident Response: Upload Error Screenshot"
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -78,21 +98,24 @@ jobs:
           path: scripts/cf_block_error.png
           retention-days: 3
 
-      # ── 8. 官方原生机制清理日志 ─────────────────────────────────
-      - name: Auto Clean Workflow History (Keep Last 5)
-        if: always() # 确保无论脚本成功还是失败，都会触发日志清理
+      # ── 8. 日志极简修剪 ───────────────────────────────────────
+      - name: "🧹 [8/8] Maintenance: Purge Workflow History Log"
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "[*] 正在通过 GitHub 官方 CLI 审计运行日志历史..."
+          echo "======================================================="
+          echo "🔍 正在检索当前工作流沉淀的历史日志..."
           RUN_IDS=$(gh run list --workflow "${{ github.workflow }}" --json databaseId --limit 100 | jq -r '.[].databaseId' | grep -v "${{ github.run_id }}" | tail -n +6)
           
           if [ -z "$RUN_IDS" ]; then
-            echo "[+] 运行历史记录少于 5 次，无需进行裁剪清理。"
+            echo "🟢 历史足迹健康（<= 5次），无需进行裁剪。"
           else
+            echo "🗑️ 正在安全擦除冗余的历史运行痕迹..."
             for id in $RUN_IDS; do
-              echo "[*] 正在安全擦除历史沉淀日志 ID: #$id"
+              echo "   └─ 正在粉碎审计记录 ID: #$id"
               gh run delete "$id" || true
             done
-            echo "[+] 裁剪完毕，严格锁定保留最新 5 次历史记录。"
+            echo "✨ [PRUNE COMPLETE] 日志库已严格瘦身，锁定保留最新 5 次。"
           fi
+          echo "======================================================="
