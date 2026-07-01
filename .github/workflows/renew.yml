@@ -11,10 +11,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Checkout Runtime
+      - name: Checkout Runtime Base
         uses: actions/checkout@v4
 
-      - name: Checkout Private Core
+      # 🔐 核心安全屏障：使用 GH_PAT 动态将私有仓库的脚本拉取到本地
+      - name: Checkout Private Core Suite
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/GuppyNodes-scripts
@@ -24,6 +25,17 @@ jobs:
       - name: Deploy Runtime Dependencies
         run: pip install --quiet curl_cffi pynacl
 
+      - name: Launch Sing-Box Binary
+        env:
+          PROXY_NODE: ${{ secrets.PROXY_NODE }}
+        run: |
+          if [[ -n "$PROXY_NODE" && ! "$PROXY_NODE" =~ ^(socks|http) ]]; then
+            echo "[*] 部署系统原生 sing-box 静态核心..."
+            wget -q https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-1.11.0-linux-amd64.tar.gz
+            tar -xzf sing-box-1.11.0-linux-amd64.tar.gz && mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
+            rm -rf sing-box-*
+          fi
+
       - name: Execute Intercept Pipeline
         env:
           COOKIE:       ${{ secrets.COOKIE }}
@@ -31,4 +43,28 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
           PROXY_NODE:   ${{ secrets.PROXY_NODE }}
-        run: python scripts/renew.py
+        run: |
+          # 1. 解析纯变量并构建私库中的 sing-box 分流矩阵
+          python3 -c "import sys; sys.path.append('scripts'); from renew import parse_singbox_module; parse_singbox_module()"
+          
+          # 2. 如果生成了分流配置，则挂载隧道守护进程
+          if [ -f "sb.json" ]; then
+            echo "[*] 挂载清洗后的 sing-box 守护进程..."
+            ./sing-box run -c sb.json > /dev/null 2>&1 &
+            sleep 3
+          fi
+          
+          # 3. 运行私库中的纯业务续期核心
+          python3 scripts/renew.py
+
+      # =======================================================
+      # 🛠️ 独立运维模块：完全解耦，确保哪怕续期报错也必然强制裁切历史记录
+      # =======================================================
+      - name: Purge Obsolete Workflow History
+        uses: Mattraks/delete-workflow-runs@v2
+        if: always() 
+        with:
+          token: ${{ secrets.GH_PAT }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 3 # 严格留存最后 3 次历史记录
