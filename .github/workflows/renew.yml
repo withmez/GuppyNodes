@@ -11,9 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # 🌟 必须在这里显式声明 actions: write，gh CLI 才有权限删除日志
     permissions:
-      actions: write
+      actions: write   # 显式声明 actions: write，gh CLI 才有权限删除日志
       contents: read
 
     steps:
@@ -33,15 +32,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11' # 升级到推荐的 3.11，完美支持强类型注解
 
       # ── 4. 安装核心依赖 (Playwright & 下载 Sing-box) ──────────
       - name: Install System & Python Dependencies
         run: |
           pip install --upgrade pip
-          pip install requests playwright
-          playwright install chromium
-          playwright install-deps chromium
+          pip install requests beautifulsoup4 playwright playwright-stealth tenacity pydantic PyGithub
+          playwright install chromium --with-deps
           
           # 下载官方原生高性能 Sing-box 核心并移动到系统 PATH 中
           curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.8.5/sing-box-1.8.5-linux-amd64.tar.gz
@@ -49,19 +47,29 @@ jobs:
           sudo mv sing-box-*/sing-box /usr/local/bin/
           chmod +x /usr/local/bin/sing-box
 
-      # ── 5. 强力穿盾：执行全包办式 Python 脚本 (🔥修正路径与执行命令) ──
+      # ── 5. 读取云端 Cookie 缓存（实现自愈刷新环路） ────────────
+      - name: Restore Active Cookie Cache from Private Secret
+        run: |
+          if [ ! -z "${{ secrets.GUPPY_COOKIE }}" ]; then
+            echo '${{ secrets.GUPPY_COOKIE }}' > scripts/cookies.json
+            echo "[+] 成功从私库密文库倒灌注入历史活跃会话缓存。"
+          fi
+
+      # ── 6. 强力穿盾：执行全包办式 Python 脚本 ──────────────────
       - name: Execute Browser Automation Script
         env:
           GUPPY_USERNAME: ${{ secrets.GUPPY_USERNAME }}
           GUPPY_PASSWORD: ${{ secrets.GUPPY_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY_NODE: ${{ secrets.PROXY_NODE }} # 可选
+          PROXY_NODE: ${{ secrets.PROXY_NODE }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          PRIVATE_REPOSITORY: ${{ github.repository_owner }}/GuppyNodes-scripts
         run: |
           cd scripts
-          python renew.py
+          python main.py
 
-      # ── 6. 异常熔断机制：失败时上传现场截图 ─────────────────────
+      # ── 7. 异常熔断机制：失败时上传现场截图 ─────────────────────
       - name: Upload Error Screenshot if Failed
         if: failure()
         uses: actions/upload-artifact@v4
@@ -70,14 +78,13 @@ jobs:
           path: scripts/cf_block_error.png
           retention-days: 3
 
-      # ── 7. 官方原生机制清理日志 ─────────────────────────────────
+      # ── 8. 官方原生机制清理日志 ─────────────────────────────────
       - name: Auto Clean Workflow History (Keep Last 5)
         if: always() # 确保无论脚本成功还是失败，都会触发日志清理
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 使用内置令牌
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "[*] 正在通过 GitHub 官方 CLI 审计运行日志历史..."
-          # 获取当前工作流名称下的所有历史运行 ID，排除掉当前正在运行的这一次，并跳过最新的 5 次
           RUN_IDS=$(gh run list --workflow "${{ github.workflow }}" --json databaseId --limit 100 | jq -r '.[].databaseId' | grep -v "${{ github.run_id }}" | tail -n +6)
           
           if [ -z "$RUN_IDS" ]; then
