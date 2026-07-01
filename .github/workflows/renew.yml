@@ -1,4 +1,4 @@
-name: "🔄 GuppyNodes Auto Renew Engine"
+name: GuppyNodes Auto Renew Matrix
 
 on:
   schedule:
@@ -7,120 +7,28 @@ on:
 
 jobs:
   renew:
-    name: "🚀 Execute Core Pipeline"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      actions: write
-      contents: read
 
     steps:
-      - name: "📂 [1/8] Checkout Public Repository"
+      - name: Checkout Runtime
         uses: actions/checkout@v4
 
-      - name: "🔒 [2/8] Fetch Private Core Scripts"
+      - name: Checkout Private Core
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/GuppyNodes-scripts
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GH_PAT }} 
           path: scripts
 
-      - name: "🐍 [3/8] Deploy Python Environment"
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      - name: Deploy Runtime Dependencies
+        run: pip install --quiet curl_cffi pynacl
 
-      - name: "📦 [4/8] Install Dependencies"
-        run: |
-          echo "======================================================="
-          echo "⚙️ 正在初始化底层依赖架构..."
-          echo "======================================================="
-          pip install --upgrade pip
-          pip install curl-cffi beautifulsoup4 pydantic PyGithub requests
-          echo "✅ curl_cffi + 核心依赖安装完成"
-          echo "======================================================="
-
-      - name: "🚀 [5/8] Start Sing-box Proxy Engine"
-        if: ${{ env.HAS_PROXY == 'true' }}
+      - name: Execute Intercept Pipeline
         env:
-          HAS_PROXY: ${{ secrets.PROXY_NODE != '' }}
-        run: |
-          echo "🔧 正在启动 Sing-box 流量清洗引擎..."
-          
-          # 正确可靠的下载方式（2026最新）
-          echo "📥 下载 Sing-box..."
-          curl -L -o sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz"
-          
-          # 验证文件
-          if [ ! -s sing-box.tar.gz ] || [ $(file sing-box.tar.gz | grep -c "gzip") -eq 0 ]; then
-            echo "⚠️ 下载异常，尝试备用链接..."
-            curl -L -o sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-amd64.tar.gz"
-          fi
-          
-          tar -xzf sing-box.tar.gz
-          sudo mv sing-box-*/sing-box /usr/local/bin/sing-box 2>/dev/null || mv sing-box /usr/local/bin/sing-box
-          chmod +x /usr/local/bin/sing-box
-          rm -f sing-box.tar.gz
-          
-          echo "✅ Sing-box 安装并启动成功 (v$(sing-box version 2>/dev/null || echo 'unknown'))"
-          echo "======================================================="
-
-      - name: "💾 [6/8] Load Cookie Session"
-        run: |
-          echo "======================================================="
-          if [ -n "${{ secrets.GUPPY_COOKIE }}" ]; then
-            echo '${{ secrets.GUPPY_COOKIE }}' > scripts/cookies.json
-            echo "🔓 历史会话 Cookie 已成功注入"
-          else
-            echo "⚠️ 未检测到 GUPPY_COOKIE Secret"
-          fi
-          echo "======================================================="
-
-      - name: "🔥 [7/8] Run Cloudflare-Bypass Automation Task"
-        env:
+          COOKIE:       ${{ secrets.COOKIE }}
+          GH_PAT:       ${{ secrets.GH_PAT }} 
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY_NODE: ${{ secrets.PROXY_NODE }}
-          GH_PAT: ${{ secrets.GH_PAT }}
-          PRIVATE_REPOSITORY: ${{ github.repository_owner }}/GuppyNodes-scripts
-          GUPPY_COOKIE: ${{ secrets.GUPPY_COOKIE }}
-        run: |
-          echo "======================================================="
-          echo "🚀 正在穿透安全屏障并接管续期流..."
-          echo "📂 仓库: ${{ github.repository }}"
-          echo "🕒 时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
-          echo "======================================================="
-          
-          cd scripts
-          python renew.py
-          
-          echo "======================================================="
-          echo "🏁 核心任务执行完毕"
-          echo "======================================================="
-
-      - name: "📸 [8/8] Upload Error Artifacts"
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-screenshots
-          path: scripts/*.png
-          retention-days: 3
-
-      - name: "🧹 Purge Old Workflow Logs"
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "======================================================="
-          echo "🧹 正在清理历史工作流记录（保留最新 5 次）..."
-          RUN_IDS=$(gh run list --workflow "${{ github.workflow }}" --json databaseId --limit 50 | jq -r '.[].databaseId' | grep -v "${{ github.run_id }}" | tail -n +6)
-          if [ -n "$RUN_IDS" ]; then
-            for id in $RUN_IDS; do
-              echo " └─ 删除历史记录: #$id"
-              gh run delete "$id" --yes || true
-            done
-            echo "✨ 历史日志瘦身完成"
-          else
-            echo "🟢 当前历史记录健康"
-          fi
-          echo "======================================================="
+          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+          PROXY_NODE:   ${{ secrets.PROXY_NODE }}
+        run: python scripts/renew.py
