@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # 🌟 必须在这里显式声明 actions: write，gh CLI 才有权限删除日志
+    permissions:
+      actions: write
+      contents: read
+
     steps:
       # ── 1. 检出公共仓库 ───────────────────────────────────────
       - name: Checkout
@@ -51,8 +56,9 @@ jobs:
           GUPPY_PASSWORD: ${{ secrets.GUPPY_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY_NODE: ${{ secrets.PROXY_NODE }} # 可选：支持各种原生节点/订阅链接，不填则自动直连
+          PROXY_NODE: ${{ secrets.PROXY_NODE }} # 可选
         run: |
+          
           python renew.py
   
       # ── 6. 异常熔断机制：失败时上传现场截图 ─────────────────────
@@ -64,11 +70,22 @@ jobs:
           path: scripts/cf_block_error.png
           retention-days: 3
   
-      # ── 7. 日志压缩审计：保留最近 5 次历史记录 ─────────────────
+      # ── 7. 官方原生机制清理日志 (只保留最近 5 次，替代老旧插件) ──
       - name: Auto Clean Workflow History (Keep Last 5)
-        uses: Actions-R-Us/delete-workflow-runs@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          retain_days: 0
-          keep_minimum_runs: 5
+        if: always() # 确保无论脚本成功还是失败，都会触发日志清理
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 使用内置令牌即可
+        run: |
+          echo "[*] 正在通过 GitHub 官方 CLI 审计运行日志历史..."
+          # 获取当前工作流名称下的所有历史运行 ID，排除掉当前正在运行的这一次，并跳过最新的 5 次
+          RUN_IDS=$(gh run list --workflow "${{ github.workflow }}" --json databaseId --limit 100 | jq -r '.[].databaseId' | grep -v "${{ github.run_id }}" | tail -n +6)
+          
+          if [ -z "$RUN_IDS" ]; then
+            echo "[+] 运行历史记录少于 5 次，无需进行裁剪清理。"
+          else
+            for id in $RUN_IDS; do
+              echo "[*] 正在安全擦除历史沉淀日志 ID: #$id"
+              gh run delete "$id" || true
+            done
+            print "[+] 裁剪完毕，严格锁定保留最新 5 次历史记录。"
+          fi
