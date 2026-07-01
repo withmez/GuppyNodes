@@ -22,41 +22,11 @@ jobs:
           token: ${{ secrets.GH_PAT }} 
           path: scripts
 
+      # ✨ 一键统一部署 Python 运行依赖
       - name: Deploy Runtime Dependencies
         run: pip install --quiet curl_cffi pynacl
 
-      - name: Launch Sing-Box Binary
-        env:
-          PROXY_NODE: ${{ secrets.PROXY_NODE }}
-        run: |
-          if [[ -n "$PROXY_NODE" && ! "$PROXY_NODE" =~ ^(socks|http) ]]; then
-            echo "[*] 正在动态获取 sing-box 最新稳定版本号..."
-            
-            # 自动从 GitHub API 获取最新的 tag 名并去掉开头的 v
-            LATEST_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name | sed 's/^v//')
-            
-            if [ -z "$LATEST_VER" ] || [ "$LATEST_VER" = "null" ]; then
-              echo "[-] 动态获取版本失败，启用 1.11.0 备用硬编码熔断"
-              LATEST_VER="1.11.0"
-            fi
-            
-            echo "[+] 当前最新版本: $LATEST_VER，开始下载静态核心..."
-            
-            # 使用动态版本号精准组装下载链接，杜绝 404
-            wget -q "https://github.com/SagerNet/sing-box/releases/download/v${LATEST_VER}/sing-box-${LATEST_VER}-linux-amd64.tar.gz"
-            
-            echo "[*] 解压并注入清洗环境..."
-            tar -xzf "sing-box-${LATEST_VER}-linux-amd64.tar.gz"
-            mv sing-box-*/sing-box ./sing-box
-            chmod +x ./sing-box
-            
-            # 清理临时文件
-            rm -rf sing-box-*
-            echo "[+] sing-box 静态核心部署就绪。"
-          else
-            echo "[*] 命中直连或标准代理，跳过原生核心下载。"
-          fi
-
+      # 🚀 纯净执行管线：不再从外部 import，所有节点判断与 sing-box 唤醒交由脚本底层闭环
       - name: Execute Intercept Pipeline
         env:
           COOKIE:       ${{ secrets.COOKIE }}
@@ -65,17 +35,6 @@ jobs:
           TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
           PROXY_NODE:   ${{ secrets.PROXY_NODE }}
         run: |
-          # 1. 解析纯变量并构建私库中的 sing-box 分流配置
-          python3 -c "import sys; sys.path.append('scripts'); from renew import parse_singbox_module; parse_singbox_module()"
-          
-          # 2. 如果生成了分流配置，则挂载隧道守护进程
-          if [ -f "sb.json" ]; then
-            echo "[*] 挂载清洗后的 sing-box 守护进程..."
-            ./sing-box run -c sb.json > /dev/null 2>&1 &
-            sleep 3
-          fi
-          
-          # 3. 运行私库中的纯业务续期核心
           python3 scripts/renew.py
 
       # =======================================================
