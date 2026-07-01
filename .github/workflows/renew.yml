@@ -2,7 +2,7 @@ name: "🔄 GuppyNodes Auto Renew Engine"
 
 on:
   schedule:
-    - cron: '30 4 */20 * *'
+    - cron: '30 4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -46,11 +46,13 @@ jobs:
           HAS_PROXY: ${{ secrets.PROXY_NODE != '' }}
         run: |
           echo "🔧 正在启动 Sing-box 流量清洗引擎..."
-          curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-1.11.0-linux-amd64.tar.gz
-          tar -xzf sing-box.tar.gz
-          sudo mv sing-box-*/sing-box /usr/local/bin/
+          # 使用正确的最新下载方式
+          curl -L -o sing-box.gz https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz
+          tar -xzf sing-box.gz
+          sudo mv sing-box-*/sing-box /usr/local/bin/sing-box
           chmod +x /usr/local/bin/sing-box
-          echo "✅ Sing-box 就绪"
+          rm -f sing-box.gz
+          echo "✅ Sing-box 安装并启动成功"
           echo "======================================================="
 
       - name: "💾 [6/8] Load Cookie Session"
