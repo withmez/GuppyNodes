@@ -1,9 +1,9 @@
-name: GuppyNodes Renew
+name: GuppyNodes Auto Renew
 
 on:
   schedule:
-  
-    - cron: '30 4 */15 * *'
+    # 每 6 天的 04:30 UTC 运行一次
+    - cron: '30 4 */20 * *'
   workflow_dispatch:
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      # ── 4. 安装核心依赖 (Playwright & Sing-box 二进制) ────────
+      # ── 4. 安装核心依赖 (Playwright & 下载 Sing-box) ──────────
       - name: Install System & Python Dependencies
         run: |
           pip install --upgrade pip
@@ -38,146 +38,25 @@ jobs:
           playwright install chromium
           playwright install-deps chromium
           
-          # 下载官方原生高性能 Sing-box 核心
+          # 下载官方原生高性能 Sing-box 核心并移动到系统 PATH 中
           curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.8.5/sing-box-1.8.5-linux-amd64.tar.gz
           tar -xvf sing-box.tar.gz
           sudo mv sing-box-*/sing-box /usr/local/bin/
           chmod +x /usr/local/bin/sing-box
 
-      # ── 5. 自动清洗转换：将节点 URL 转换为现代 sing-box JSON ──
-      - name: Generate Sing-box Config
-        env:
-          PROXY_NODE: ${{ secrets.PROXY_NODE }}
-        run: |
-          python - << 'EOF'
-          import os
-          import json
-          import re
-          import base64
-          from urllib.parse import urlparse, unquote
-
-          node_url = os.getenv("PROXY_NODE", "").strip()
-
-          # 默认骨架 (直连)
-          config = {
-              "log": {"level": "warn"},
-              "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}],
-              "outbounds": [{"type": "direct", "tag": "direct-out"}]
-          }
-
-          if node_url:
-              try:
-                  # 如果是订阅链接（http开头），尝试拉取并解密
-                  if node_url.startswith("http://") or node_url.startswith("https://"):
-                      import requests
-                      res = requests.get(node_url, timeout=10)
-                      # 尝试 base64 解码订阅内容
-                      try:
-                          decoded = base64.b64decode(res.text).decode('utf-8')
-                          node_url = decoded.splitlines()[0] # 提取第一条节点
-                      except Exception:
-                          node_url = res.text.splitlines()[0]
-
-                  print(f"[*] 正在清洗目标节点协议...")
-                  parsed = urlparse(node_url)
-                  scheme = parsed.scheme.lower()
-                  
-                  outbound = {"tag": "proxy-out"}
-
-                  # 1. Hysteria2 (hy2) 原生转换
-                  if scheme in ["hysteria2", "hy2"]:
-                      outbound["type"] = "hysteria2"
-                      outbound["server"] = parsed.hostname
-                      outbound["server_port"] = parsed.port or 443
-                      outbound["password"] = parsed.username
-                      # 提取参数
-                      query = dict(re.findall(r'([^=&]+)=([^&]*)', parsed.query))
-                      outbound["tls"] = {
-                          "enabled": True,
-                          "server_name": query.get("sni", parsed.hostname),
-                          "insecure": query.get("insecure", "1") in ["1", "true"]
-                      }
-                  
-                  # 2. Vless 原生转换
-                  elif scheme == "vless":
-                      outbound["type"] = "vless"
-                      outbound["server"] = parsed.hostname
-                      outbound["server_port"] = parsed.port or 443
-                      outbound["uuid"] = parsed.username
-                      query = dict(re.findall(r'([^=&]+)=([^&]*)', parsed.query))
-                      outbound["flow"] = query.get("flow", "")
-                      outbound["tls"] = {
-                          "enabled": query.get("security") == "tls",
-                          "server_name": query.get("sni", parsed.hostname),
-                          "insecure": query.get("insecure") in ["1", "true"]
-                      }
-                      if not outbound["flow"]: outbound.pop("flow")
-
-                  # 3. Trojan 原生转换
-                  elif scheme == "trojan":
-                      outbound["type"] = "trojan"
-                      outbound["server"] = parsed.hostname
-                      outbound["server_port"] = parsed.port or 443
-                      outbound["password"] = parsed.username
-                      query = dict(re.findall(r'([^=&]+)=([^&]*)', parsed.query))
-                      outbound["tls"] = {
-                          "enabled": True,
-                          "server_name": query.get("sni", parsed.hostname),
-                          "insecure": query.get("insecure") in ["1", "true"]
-                      }
-
-                  # 4. Shadowsocks (ss) 原生转换
-                  elif scheme == "ss":
-                      outbound["type"] = "shadowsocks"
-                      # ss 链接的密码部分经常进行过 base64 加密
-                      if "@" in parsed.netloc:
-                          userinfo = parsed.userinfo
-                          try:
-                              # 处理 加密方法:密码 的 base64 形式
-                              decoded_userinfo = base64.b64decode(userinfo + "==").decode('utf-8')
-                              method, password = decoded_userinfo.split(":", 1)
-                          except Exception:
-                              method, password = userinfo.split(":", 1)
-                          outbound["server"] = parsed.hostname
-                          outbound["server_port"] = parsed.port
-                          outbound["method"] = method
-                          outbound["password"] = password
-
-                  if "type" in outbound:
-                      # 注入清洗后的节点出站，并移至第一顺位
-                      config["outbounds"].insert(0, outbound)
-                      print(f"[+] 完美清洗成功！协议类型: {outbound['type']}")
-                  else:
-                      print("[-] 未识别的协议或格式，回退至直连环境。")
-
-              except Exception as e:
-                  print(f"[-] 自动转换发生异常: {e}，将使用直连。")
-
-          with open("singbox_config.json", "w") as f:
-              json.dump(config, f, indent=2)
-          EOF
-
-      # ── 6. 底层拉起 Sing-box 路由环境 ──────────────────────────
-      - name: Start Sing-box Core Service
-        run: |
-          echo "[*] 正在 Ubuntu 底层静默异步拉起 Sing-box 路由网络..."
-          nohup sing-box run -c singbox_config.json > singbox.log 2>&1 &
-          sleep 5
-          # 验证连通性
-          curl --socks5-hostname 127.0.0.1:2080 https://www.google.com -I || echo "提示: 隧道初始化完毕。"
-
-      # ── 7. 强力穿盾：执行浏览器自动化脚本 ────────────────────────
+      # ── 5. 强力穿盾：执行全包办式 Python 脚本 ────────────────────
       - name: Execute Browser Automation Script
         env:
           GUPPY_USERNAME: ${{ secrets.GUPPY_USERNAME }}
           GUPPY_PASSWORD: ${{ secrets.GUPPY_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_NODE: ${{ secrets.PROXY_NODE }} # 可选：支持各种原生节点/订阅链接，不填则自动直连
         run: |
           cd scripts
           python renew_browser.py
   
-      # ── 8. 异常熔断机制：失败时上传现场截图 ─────────────────────
+      # ── 6. 异常熔断机制：失败时上传现场截图 ─────────────────────
       - name: Upload Error Screenshot if Failed
         if: failure()
         uses: actions/upload-artifact@v4
@@ -186,7 +65,7 @@ jobs:
           path: scripts/cf_block_error.png
           retention-days: 3
   
-      # ── 9. 日志压缩审计：保留最近 5 次历史记录 ─────────────────
+      # ── 7. 日志压缩审计：保留最近 5 次历史记录 ─────────────────
       - name: Auto Clean Workflow History (Keep Last 5)
         uses: Actions-R-Us/delete-workflow-runs@v4
         with:
