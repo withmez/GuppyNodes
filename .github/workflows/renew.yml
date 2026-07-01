@@ -2,7 +2,7 @@ name: "🔄 GuppyNodes Auto Renew Engine"
 
 on:
   schedule:
-    - cron: '30 4 * * *'     
+    - cron: '30 4 */20 * *'
   workflow_dispatch:
 
 jobs:
@@ -41,7 +41,9 @@ jobs:
           echo "======================================================="
 
       - name: "🚀 [5/8] Start Sing-box Proxy Engine"
-        if: ${{ secrets.PROXY_NODE != '' }}
+        if: ${{ env.HAS_PROXY == 'true' }}
+        env:
+          HAS_PROXY: ${{ secrets.PROXY_NODE != '' }}
         run: |
           echo "🔧 正在启动 Sing-box 流量清洗引擎..."
           curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-1.11.0-linux-amd64.tar.gz
@@ -54,11 +56,11 @@ jobs:
       - name: "💾 [6/8] Load Cookie Session"
         run: |
           echo "======================================================="
-          if [ ! -z "${{ secrets.GUPPY_COOKIE }}" ]; then
+          if [ -n "${{ secrets.GUPPY_COOKIE }}" ]; then
             echo '${{ secrets.GUPPY_COOKIE }}' > scripts/cookies.json
             echo "🔓 历史会话 Cookie 已成功注入"
           else
-            echo "⚠️ 未检测到 GUPPY_COOKIE Secret，本次将尝试使用本地缓存"
+            echo "⚠️ 未检测到 GUPPY_COOKIE Secret"
           fi
           echo "======================================================="
 
@@ -107,6 +109,6 @@ jobs:
             done
             echo "✨ 历史日志瘦身完成"
           else
-            echo "🟢 当前历史记录健康，无需清理"
+            echo "🟢 当前历史记录健康"
           fi
           echo "======================================================="
