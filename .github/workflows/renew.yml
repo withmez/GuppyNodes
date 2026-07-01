@@ -2,8 +2,7 @@ name: "🔄 GuppyNodes Auto Renew Engine"
 
 on:
   schedule:
-    # 每 20 天的 04:30 UTC 运行一次
-    - cron: '30 4 */20 * *'
+    - cron: '30 4 * * *'     
   workflow_dispatch:
 
 jobs:
@@ -11,111 +10,103 @@ jobs:
     name: "🚀 Execute Core Pipeline"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     permissions:
-      actions: write   # 允许 gh CLI 裁剪与擦除历史运行日志
+      actions: write
       contents: read
 
     steps:
-      # ── 1. 环境初始化 ───────────────────────────────────────
-      - name: "📂 [1/8] Checkout Public Proxy Repository"
+      - name: "📂 [1/8] Checkout Public Repository"
         uses: actions/checkout@v4
 
-      # ── 2. 安全拉取私有核心 ───────────────────────────────────
-      - name: "🔒 [2/8] Fetch Private Core Scripts Securely"
+      - name: "🔒 [2/8] Fetch Private Core Scripts"
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/GuppyNodes-scripts
           token: ${{ secrets.GH_PAT }}
           path: scripts
 
-      # ── 3. 部署统一运行环境 ───────────────────────────────────
-      - name: "🐍 [3/8] Deploy Python Standard Environment"
+      - name: "🐍 [3/8] Deploy Python Environment"
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # ── 4. 依赖注入与裁剪（✨已修复 email-validator 报错） ───
-      - name: "📦 [4/8] Inject Python & System Dependencies"
+      - name: "📦 [4/8] Install Dependencies"
         run: |
           echo "======================================================="
           echo "⚙️ 正在初始化底层依赖架构..."
           echo "======================================================="
           pip install --upgrade pip
-          
-          # ✨ 核心修复：显式安装 email-validator 解决 Pydantic 编译熔断问题
-          pip install requests beautifulsoup4 playwright playwright-stealth tenacity pydantic PyGithub email-validator
-          
-          echo "[+] Python 依赖库加载完毕，开始部署浏览器内核..."
-          playwright install chromium --with-deps
-          
-          echo "[+] 正在拉取 Sing-box 流量清洗引擎..."
-          curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.8.5/sing-box-1.8.5-linux-amd64.tar.gz
-          tar -xvf sing-box.tar.gz
-          sudo mv sing-box-*/sing-box /usr/local/bin/
-          chmod +x /usr/local/bin/sing-box
-          
-          echo "-------------------------------------------------------"
-          echo "✅ 基础运行环境准备就绪！"
+          pip install curl-cffi beautifulsoup4 pydantic PyGithub requests
+          echo "✅ curl_cffi + 核心依赖安装完成"
           echo "======================================================="
 
-      # ── 5. 会话级缓存自愈回灌 ─────────────────────────────────
-      - name: "💾 [5/8] Hydrate Session Cache From Secret Store"
+      - name: "🚀 [5/8] Start Sing-box Proxy Engine"
+        if: ${{ secrets.PROXY_NODE != '' }}
+        run: |
+          echo "🔧 正在启动 Sing-box 流量清洗引擎..."
+          curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-1.11.0-linux-amd64.tar.gz
+          tar -xzf sing-box.tar.gz
+          sudo mv sing-box-*/sing-box /usr/local/bin/
+          chmod +x /usr/local/bin/sing-box
+          echo "✅ Sing-box 就绪"
+          echo "======================================================="
+
+      - name: "💾 [6/8] Load Cookie Session"
         run: |
           echo "======================================================="
           if [ ! -z "${{ secrets.GUPPY_COOKIE }}" ]; then
             echo '${{ secrets.GUPPY_COOKIE }}' > scripts/cookies.json
-            echo "🔓 [SUCCESS] 发现历史活跃会话，成功反向注入本地文件。"
+            echo "🔓 历史会话 Cookie 已成功注入"
           else
-            echo "⚠️ [NOTICE] 未检测到云端历史凭证，本次执行将初始化全新登录。"
+            echo "⚠️ 未检测到 GUPPY_COOKIE Secret，本次将尝试使用本地缓存"
           fi
           echo "======================================================="
 
-      # ── 6. 核心自动化执行 ─────────────────────────────────────
-      - name: "🔥 [6/8] Run Cloudflare-Bypass Automation Task"
+      - name: "🔥 [7/8] Run Cloudflare-Bypass Automation Task"
         env:
-          GUPPY_USERNAME: ${{ secrets.GUPPY_USERNAME }}
-          GUPPY_PASSWORD: ${{ secrets.GUPPY_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           PROXY_NODE: ${{ secrets.PROXY_NODE }}
           GH_PAT: ${{ secrets.GH_PAT }}
           PRIVATE_REPOSITORY: ${{ github.repository_owner }}/GuppyNodes-scripts
+          GUPPY_COOKIE: ${{ secrets.GUPPY_COOKIE }}
         run: |
           echo "======================================================="
           echo "🚀 正在穿透安全屏障并接管续期流..."
+          echo "📂 仓库: ${{ github.repository }}"
+          echo "🕒 时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
           echo "======================================================="
+          
           cd scripts
           python renew.py
+          
+          echo "======================================================="
+          echo "🏁 核心任务执行完毕"
           echo "======================================================="
 
-      # ── 7. 异常熔断保护机制 ───────────────────────────────────
-      - name: "📸 [7/8] Incident Response: Upload Error Screenshot"
+      - name: "📸 [8/8] Upload Error Artifacts"
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: cf-block-screenshot
-          path: scripts/cf_block_error.png
+          name: error-screenshots
+          path: scripts/*.png
           retention-days: 3
 
-      # ── 8. 日志极简修剪 ───────────────────────────────────────
-      - name: "🧹 [8/8] Maintenance: Purge Workflow History Log"
+      - name: "🧹 Purge Old Workflow Logs"
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "======================================================="
-          echo "🔍 正在检索当前工作流沉淀的历史日志..."
-          RUN_IDS=$(gh run list --workflow "${{ github.workflow }}" --json databaseId --limit 100 | jq -r '.[].databaseId' | grep -v "${{ github.run_id }}" | tail -n +6)
-          
-          if [ -z "$RUN_IDS" ]; then
-            echo "🟢 历史足迹健康（<= 5次），无需进行裁剪。"
-          else
-            echo "🗑️ 正在安全擦除冗余的历史运行痕迹..."
+          echo "🧹 正在清理历史工作流记录（保留最新 5 次）..."
+          RUN_IDS=$(gh run list --workflow "${{ github.workflow }}" --json databaseId --limit 50 | jq -r '.[].databaseId' | grep -v "${{ github.run_id }}" | tail -n +6)
+          if [ -n "$RUN_IDS" ]; then
             for id in $RUN_IDS; do
-              echo "   └─ 正在粉碎审计记录 ID: #$id"
-              gh run delete "$id" || true
+              echo " └─ 删除历史记录: #$id"
+              gh run delete "$id" --yes || true
             done
-            echo "✨ [PRUNE COMPLETE] 日志库已严格瘦身，锁定保留最新 5 次。"
+            echo "✨ 历史日志瘦身完成"
+          else
+            echo "🟢 当前历史记录健康，无需清理"
           fi
           echo "======================================================="
