@@ -67,7 +67,7 @@ jobs:
           PRIVATE_REPOSITORY: ${{ github.repository_owner }}/GuppyNodes-scripts
         run: |
           cd scripts
-          python main.py
+          python renew.py
 
       # ── 7. 异常熔断机制：失败时上传现场截图 ─────────────────────
       - name: Upload Error Screenshot if Failed
