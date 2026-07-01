@@ -2,7 +2,7 @@ name: "🔄 GuppyNodes Auto Renew Engine"
 
 on:
   schedule:
-    - cron: '30 4 * * *'
+    - cron: '30 4 */20 * *'
   workflow_dispatch:
 
 jobs:
@@ -46,13 +46,23 @@ jobs:
           HAS_PROXY: ${{ secrets.PROXY_NODE != '' }}
         run: |
           echo "🔧 正在启动 Sing-box 流量清洗引擎..."
-          # 使用正确的最新下载方式
-          curl -L -o sing-box.gz https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz
-          tar -xzf sing-box.gz
-          sudo mv sing-box-*/sing-box /usr/local/bin/sing-box
+          
+          # 正确可靠的下载方式（2026最新）
+          echo "📥 下载 Sing-box..."
+          curl -L -o sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/latest/download/sing-box-linux-amd64.tar.gz"
+          
+          # 验证文件
+          if [ ! -s sing-box.tar.gz ] || [ $(file sing-box.tar.gz | grep -c "gzip") -eq 0 ]; then
+            echo "⚠️ 下载异常，尝试备用链接..."
+            curl -L -o sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-amd64.tar.gz"
+          fi
+          
+          tar -xzf sing-box.tar.gz
+          sudo mv sing-box-*/sing-box /usr/local/bin/sing-box 2>/dev/null || mv sing-box /usr/local/bin/sing-box
           chmod +x /usr/local/bin/sing-box
-          rm -f sing-box.gz
-          echo "✅ Sing-box 安装并启动成功"
+          rm -f sing-box.tar.gz
+          
+          echo "✅ Sing-box 安装并启动成功 (v$(sing-box version 2>/dev/null || echo 'unknown'))"
           echo "======================================================="
 
       - name: "💾 [6/8] Load Cookie Session"
