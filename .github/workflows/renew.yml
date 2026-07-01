@@ -1,4 +1,4 @@
-name: GuppyNodes Renew
+name: GuppyNodes Auto Renew
 
 on:
   schedule:
@@ -58,7 +58,6 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           PROXY_NODE: ${{ secrets.PROXY_NODE }} # 可选
         run: |
-          
           python renew.py
   
       # ── 6. 异常熔断机制：失败时上传现场截图 ─────────────────────
@@ -70,11 +69,11 @@ jobs:
           path: scripts/cf_block_error.png
           retention-days: 3
   
-      # ── 7. 官方原生机制清理日志 (只保留最近 5 次，替代老旧插件) ──
+      # ── 7. 官方原生机制清理日志 (修正了末尾的 echo 语法错误) ──
       - name: Auto Clean Workflow History (Keep Last 5)
         if: always() # 确保无论脚本成功还是失败，都会触发日志清理
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 使用内置令牌即可
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 使用内置令牌
         run: |
           echo "[*] 正在通过 GitHub 官方 CLI 审计运行日志历史..."
           # 获取当前工作流名称下的所有历史运行 ID，排除掉当前正在运行的这一次，并跳过最新的 5 次
@@ -87,5 +86,5 @@ jobs:
               echo "[*] 正在安全擦除历史沉淀日志 ID: #$id"
               gh run delete "$id" || true
             done
-            print "[+] 裁剪完毕，严格锁定保留最新 5 次历史记录。"
+            echo "[+] 裁剪完毕，严格锁定保留最新 5 次历史记录。"
           fi
